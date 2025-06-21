@@ -40,7 +40,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.message.chat.type
     chat_id_str = str(update.message.chat.id)
 
-    if ALLOWED_GROUP_ID and chat_type != 'private' and chat_id_str != ALLOWED_GROUP_ID:
+    # Если задан ID группы, бот работает только в ней и в личных сообщениях.
+    is_allowed_chat = not ALLOWED_GROUP_ID or chat_type == 'private' or chat_id_str == ALLOWED_GROUP_ID
+    if not is_allowed_chat:
         logger.info(f"Игнорирование команды start из чата {chat_id_str}")
         return
         
@@ -55,7 +57,9 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.message.chat.type
     chat_id_str = str(update.message.chat.id)
 
-    if ALLOWED_GROUP_ID and chat_type != 'private' and chat_id_str != ALLOWED_GROUP_ID:
+    # Если задан ID группы, бот работает только в ней и в личных сообщениях.
+    is_allowed_chat = not ALLOWED_GROUP_ID or chat_type == 'private' or chat_id_str == ALLOWED_GROUP_ID
+    if not is_allowed_chat:
         logger.info(f"Игнорирование медиа из чата {chat_id_str}")
         return
 
@@ -68,6 +72,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not media_source:
         return
 
+    # В группе отвечаем на то сообщение, которое расшифровываем
     processing_message = await message.reply_text("🧠 Получил. Начинаю расшифровку...")
 
     try:
@@ -87,7 +92,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt = "Расшифруй аудиодорожку из этого файла. Сохрани оригинальный язык и форматирование."
         response = await model.generate_content_async([prompt, audio_file_for_gemini])
 
-        transcribed_text = response.text if response.text else "[Не удалось распознать текст]"
+        transcribed_text = response.text if response.text else "[Речь не распознана]"
 
         await processing_message.edit_text(f"📄 **Расшифровка:**\n\n{transcribed_text}")
 
@@ -105,13 +110,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.message.chat.type
     chat_id_str = str(update.message.chat.id)
     
-    if ALLOWED_GROUP_ID and chat_type != 'private' and chat_id_str != ALLOWED_GROUP_ID:
-        logger.info(f"Игнорирование текста из чата {chat_id_str}")
+    # Сначала общая проверка, работает ли бот в этом чате вообще
+    is_allowed_chat = not ALLOWED_GROUP_ID or chat_type == 'private' or chat_id_str == ALLOWED_GROUP_ID
+    if not is_allowed_chat:
+        logger.info(f"Игнорирование текста из постороннего чата {chat_id_str}")
         return
         
-    await update.message.reply_text(
-        "Я умею работать только с медиа. Пожалуйста, отправьте мне голосовое сообщение, аудиофайл или видео-кружочек."
-    )
+    # Теперь, если чат разрешен, отвечаем только в личных сообщениях.
+    if chat_type == 'private':
+        await update.message.reply_text(
+            "Я умею работать только с медиа. Пожалуйста, отправьте мне голосовое сообщение, аудиофайл или видео-кружочек."
+        )
+    # Если это разрешенная группа, то просто логируем и молчим
+    else:
+        logger.info(f"Текстовое сообщение в группе {chat_id_str} проигнорировано, как и было запрошено.")
+        return
+
 
 # --- Веб-сервер-пустышка для Render ---
 
