@@ -103,13 +103,12 @@ def run_flask_app():
     def index():
         return "Бот работает в режиме polling."
 
-    # Render использует переменную PORT для своего роутера
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
 # --- Основная функция ---
 
-def main():
+async def main():
     """Основная функция для запуска бота."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Токен TELEGRAM_BOT_TOKEN не найден! Завершение работы.")
@@ -121,14 +120,21 @@ def main():
     flask_thread.start()
     logger.info("Dummy Flask сервер запущен в отдельном потоке.")
     
-    # 2. Запускаем бота в основном потоке
-    logger.info("Запуск бота в режиме polling...")
+    # 2. Создаем приложение бота
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # 3. СБРАСЫВАЕМ СТАРЫЙ ВЕБХУК (РЕШЕНИЕ ПРОБЛЕМЫ С КОНФЛИКТОМ)
+    logger.info("Сброс старых вебхуков...")
+    await application.bot.delete_webhook(drop_pending_updates=True)
 
+    # 4. Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
 
-    application.run_polling()
+    # 5. Запускаем бота
+    logger.info("Запуск бота в режиме polling...")
+    await application.run_polling()
 
 if __name__ == '__main__':
-    main()
+    # Используем asyncio для запуска асинхронной функции main
+    asyncio.run(main())
