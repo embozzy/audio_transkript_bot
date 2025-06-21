@@ -1,0 +1,10 @@
+services:
+  - type: worker
+    name: telegram-transcriber
+    env: python
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "python main.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.4
