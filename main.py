@@ -5,12 +5,15 @@ import threading
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
+
 from pydub import AudioSegment
 import google.generativeai as genai
 
 # --- Конфигурация ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+# ID группы, в которой бот должен работать. Берется из переменных окружения.
+ALLOWED_GROUP_ID = os.environ.get('ALLOWED_GROUP_ID')
 
 # Настройка логирования
 logging.basicConfig(
@@ -35,6 +38,11 @@ except Exception as e:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start."""
+    # Проверяем, что команда вызвана в разрешенной группе или в личных сообщениях
+    if ALLOWED_GROUP_ID and str(update.message.chat.id) != ALLOWED_GROUP_ID and update.message.chat.type != 'private':
+        logger.info(f"Игнорирование команды start из чата {update.message.chat.id}")
+        return
+        
     user = update.effective_user
     await update.message.reply_html(
         f"👋 Привет, {user.mention_html()}!\n\n"
@@ -43,6 +51,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик голосовых, аудио и видео-сообщений."""
+    # Проверяем, что сообщение пришло из разрешенной группы
+    if ALLOWED_GROUP_ID and str(update.message.chat.id) != ALLOWED_GROUP_ID:
+        logger.info(f"Игнорирование медиа из чата {update.message.chat.id}")
+        return
+
     if not model:
         await update.message.reply_text("🚫 Ошибка: API Gemini не настроен. Проверьте ваш API ключ на сервере.")
         return
@@ -53,6 +66,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not media_source:
         return
 
+    # В группе отвечаем на то сообщение, которое расшифровываем
     processing_message = await message.reply_text("🧠 Получил. Начинаю расшифровку...")
 
     try:
@@ -90,6 +104,11 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений."""
+    # Проверяем, что сообщение пришло из разрешенной группы
+    if ALLOWED_GROUP_ID and str(update.message.chat.id) != ALLOWED_GROUP_ID:
+        logger.info(f"Игнорирование текста из чата {update.message.chat.id}")
+        return
+        
     await update.message.reply_text(
         "Я умею работать только с медиа. Пожалуйста, отправьте мне голосовое сообщение, аудиофайл или видео-кружочек."
     )
