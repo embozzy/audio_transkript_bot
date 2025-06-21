@@ -2,13 +2,15 @@
 import logging
 import os
 import asyncio
+import threading
+from flask import Flask
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 from pydub import AudioSegment
 import google.generativeai as genai
 
 # --- Конфигурация ---
-# Берем ключи из переменных окружения, которые настроим на Render
+# Берем ключи из переменных окружения, которые настроены на Render
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
@@ -20,19 +22,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Инициализация Gemini API ---
+model = None
 try:
-    if not GEMINI_API_KEY:
-        logger.error("Ключ GEMINI_API_KEY не найден!")
-        model = None
-    else:
+    if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel('models/gemini-1.5-flash')
         logger.info("Gemini API успешно настроен.")
+    else:
+        logger.error("Ключ GEMINI_API_KEY не найден!")
 except Exception as e:
     logger.error(f"Ошибка при настройке Gemini API: {e}")
-    model = None
 
-# --- Функции-обработчики команд ---
+# --- Функции-обработчики команд Telegram ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start."""
@@ -49,40 +50,31 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     message = update.message
-    # Поддерживаем и голосовые сообщения, и аудиофайлы
     audio_source = message.voice or message.audio
-
     if not audio_source:
         return
 
-    # Отправляем пользователю сообщение о том, что начали обработку
     processing_message = await message.reply_text("🧠 Получил. Начинаю расшифровку...")
 
     try:
-        # 1. Скачиваем файл
         audio_file = await audio_source.get_file()
         
-        # Создаем уникальное имя файла
         file_path_original = f"downloads/{audio_source.file_unique_id}"
         file_path_mp3 = f"downloads/{audio_source.file_unique_id}.mp3"
-        os.makedirs("downloads", exist_ok=True) # Создаем папку, если ее нет
+        os.makedirs("downloads", exist_ok=True)
 
         await audio_file.download_to_drive(file_path_original)
         logger.info(f"Аудиофайл сохранен как {file_path_original}")
 
-        # 2. Конвертируем в .mp3
         sound = AudioSegment.from_file(file_path_original)
         sound.export(file_path_mp3, format="mp3")
         logger.info(f"Файл конвертирован в {file_path_mp3}")
 
-        # 3. Отправляем файл в Gemini API для распознавания
         audio_file_for_gemini = genai.upload_file(path=file_path_mp3)
         
-        # 4. Делаем запрос на распознавание
         prompt = "Расшифруй это аудио сообщение. Сохрани оригинальный язык и форматирование."
         response = await model.generate_content_async([prompt, audio_file_for_gemini])
 
-        # 5. Отправляем результат пользователю
         transcribed_text = response.text if response.text else "[Не удалось распознать текст]"
 
         await processing_message.edit_text(
@@ -90,37 +82,53 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        logger.error(f"Произошла ошибка при обработке аудио: {e}")
+        logger.error(f"Произошла ошибка при обработке аудио: {e}", exc_info=True)
         await processing_message.edit_text(
             "😕 Упс! Что-то пошло не так во время обработки вашего сообщения. Попробуйте еще раз."
         )
     finally:
-        # 6. Удаляем временные файлы
         if os.path.exists(file_path_original):
             os.remove(file_path_original)
         if os.path.exists(file_path_mp3):
             os.remove(file_path_mp3)
         logger.info("Временные файлы удалены.")
 
+# --- Функции для веб-сервера-пустышки ---
+
+def run_flask_app():
+    """Запускает пустой веб-сервер, чтобы Render был доволен."""
+    app = Flask(__name__)
+
+    @app.route('/')
+    def index():
+        return "Бот работает в режиме polling."
+
+    # Render использует переменную PORT для своего роутера
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# --- Основная функция ---
 
 def main():
     """Основная функция для запуска бота."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Токен TELEGRAM_BOT_TOKEN не найден! Завершение работы.")
         return
-        
-    logger.info("Запуск бота...")
 
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    # 1. Запускаем Flask в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask_app)
+    flask_thread.daemon = True
+    flask_thread.start()
+    logger.info("Dummy Flask сервер запущен в отдельном потоке.")
+    
+    # 2. Запускаем бота в основном потоке
+    logger.info("Запуск бота в режиме polling...")
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
-    # Бот будет реагировать и на голосовые, и на аудиофайлы
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
 
-    # Запускаем бота
     application.run_polling()
-
 
 if __name__ == '__main__':
     main()
