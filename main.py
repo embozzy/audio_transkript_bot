@@ -38,38 +38,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_html(
         f"👋 Привет, {user.mention_html()}!\n\n"
-        "Я бот для расшифровки голосовых сообщений. Просто перешлите мне любое аудио, и я превращу его в текст.",
+        "Я бот для расшифровки голосовых сообщений, аудиофайлов и видео-кружочков. Просто перешлите мне любое из этих медиа, и я превращу его в текст.",
     )
 
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик голосовых и аудио сообщений."""
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик голосовых, аудио и видео-сообщений."""
     if not model:
         await update.message.reply_text("🚫 Ошибка: API Gemini не настроен. Проверьте ваш API ключ на сервере.")
         return
 
     message = update.message
-    audio_source = message.voice or message.audio
-    if not audio_source:
+    # Поддерживаем голосовые, аудио и видео-кружочки
+    media_source = message.voice or message.audio or message.video_note
+    if not media_source:
         return
 
     processing_message = await message.reply_text("🧠 Получил. Начинаю расшифровку...")
 
     try:
-        audio_file = await audio_source.get_file()
+        media_file = await media_source.get_file()
         
         # Создаем временную директорию
         os.makedirs("downloads", exist_ok=True)
-        file_path_original = f"downloads/{audio_source.file_unique_id}"
-        file_path_mp3 = f"downloads/{audio_source.file_unique_id}.mp3"
+        file_path_original = f"downloads/{media_source.file_unique_id}"
+        file_path_mp3 = f"downloads/{media_source.file_unique_id}.mp3"
 
-        await audio_file.download_to_drive(file_path_original)
+        await media_file.download_to_drive(file_path_original)
         
+        # pydub сам извлечет аудиодорожку из видео
         sound = AudioSegment.from_file(file_path_original)
         sound.export(file_path_mp3, format="mp3")
 
         audio_file_for_gemini = genai.upload_file(path=file_path_mp3)
         
-        prompt = "Расшифруй это аудио сообщение. Сохрани оригинальный язык и форматирование."
+        prompt = "Расшифруй аудиодорожку из этого файла. Сохрани оригинальный язык и форматирование."
         response = await model.generate_content_async([prompt, audio_file_for_gemini])
 
         transcribed_text = response.text if response.text else "[Не удалось распознать текст]"
@@ -77,7 +79,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing_message.edit_text(f"📄 **Расшифровка:**\n\n{transcribed_text}")
 
     except Exception as e:
-        logger.error(f"Произошла ошибка при обработке аудио: {e}", exc_info=True)
+        logger.error(f"Произошла ошибка при обработке медиа: {e}", exc_info=True)
         await processing_message.edit_text("😕 Упс! Что-то пошло не так. Попробуйте еще раз.")
     finally:
         # Очистка временных файлов
@@ -85,6 +87,12 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(file_path_original)
         if os.path.exists(file_path_mp3):
             os.remove(file_path_mp3)
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик текстовых сообщений."""
+    await update.message.reply_text(
+        "Я умею работать только с медиа. Пожалуйста, отправьте мне голосовое сообщение, аудиофайл или видео-кружочек."
+    )
 
 # --- Веб-сервер-пустышка для Render ---
 
@@ -116,10 +124,12 @@ def main() -> None:
 
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE, handle_media))
+    # Добавляем обработчик для текста, исключая команды
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # Запускаем бота. Эта функция блокирующая и сама управляет asyncio.
-    # drop_pending_updates=True сбрасывает "застрявшие" сообщения при старте.
+
+    # Запускаем бота. drop_pending_updates=True сбрасывает "застрявшие" сообщения при старте.
     logger.info("Запуск бота...")
     application.run_polling(drop_pending_updates=True)
 
