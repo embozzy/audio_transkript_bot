@@ -1,7 +1,6 @@
 # main.py
 import logging
 import os
-import asyncio
 import threading
 from flask import Flask
 from telegram import Update
@@ -10,11 +9,10 @@ from pydub import AudioSegment
 import google.generativeai as genai
 
 # --- Конфигурация ---
-# Берем ключи из переменных окружения, которые настроены на Render
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# Настройка логирования для отладки
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -33,7 +31,7 @@ try:
 except Exception as e:
     logger.error(f"Ошибка при настройке Gemini API: {e}")
 
-# --- Функции-обработчики команд Telegram ---
+# --- Обработчики команд Telegram ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start."""
@@ -59,16 +57,15 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         audio_file = await audio_source.get_file()
         
+        # Создаем временную директорию
+        os.makedirs("downloads", exist_ok=True)
         file_path_original = f"downloads/{audio_source.file_unique_id}"
         file_path_mp3 = f"downloads/{audio_source.file_unique_id}.mp3"
-        os.makedirs("downloads", exist_ok=True)
 
         await audio_file.download_to_drive(file_path_original)
-        logger.info(f"Аудиофайл сохранен как {file_path_original}")
-
+        
         sound = AudioSegment.from_file(file_path_original)
         sound.export(file_path_mp3, format="mp3")
-        logger.info(f"Файл конвертирован в {file_path_mp3}")
 
         audio_file_for_gemini = genai.upload_file(path=file_path_mp3)
         
@@ -77,64 +74,54 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         transcribed_text = response.text if response.text else "[Не удалось распознать текст]"
 
-        await processing_message.edit_text(
-            f"📄 **Расшифровка:**\n\n{transcribed_text}"
-        )
+        await processing_message.edit_text(f"📄 **Расшифровка:**\n\n{transcribed_text}")
 
     except Exception as e:
         logger.error(f"Произошла ошибка при обработке аудио: {e}", exc_info=True)
-        await processing_message.edit_text(
-            "😕 Упс! Что-то пошло не так во время обработки вашего сообщения. Попробуйте еще раз."
-        )
+        await processing_message.edit_text("😕 Упс! Что-то пошло не так. Попробуйте еще раз.")
     finally:
+        # Очистка временных файлов
         if os.path.exists(file_path_original):
             os.remove(file_path_original)
         if os.path.exists(file_path_mp3):
             os.remove(file_path_mp3)
-        logger.info("Временные файлы удалены.")
 
-# --- Функции для веб-сервера-пустышки ---
+# --- Веб-сервер-пустышка для Render ---
 
 def run_flask_app():
     """Запускает пустой веб-сервер, чтобы Render был доволен."""
     app = Flask(__name__)
-
     @app.route('/')
     def index():
         return "Бот работает в режиме polling."
-
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- Основная функция ---
+# --- Основная точка входа ---
 
-async def main():
-    """Основная функция для запуска бота."""
+def main() -> None:
+    """Основная функция для запуска бота и веб-сервера."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Токен TELEGRAM_BOT_TOKEN не найден! Завершение работы.")
         return
 
-    # 1. Запускаем Flask в отдельном потоке
+    # Запускаем Flask в отдельном потоке
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.daemon = True
     flask_thread.start()
     logger.info("Dummy Flask сервер запущен в отдельном потоке.")
-    
-    # 2. Создаем приложение бота
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
-    # 3. СБРАСЫВАЕМ СТАРЫЙ ВЕБХУК (РЕШЕНИЕ ПРОБЛЕМЫ С КОНФЛИКТОМ)
-    logger.info("Сброс старых вебхуков...")
-    await application.bot.delete_webhook(drop_pending_updates=True)
 
-    # 4. Добавляем обработчики
+    # Создаем приложение бота
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
 
-    # 5. Запускаем бота
-    logger.info("Запуск бота в режиме polling...")
-    await application.run_polling()
+    # Запускаем бота. Эта функция блокирующая и сама управляет asyncio.
+    # drop_pending_updates=True сбрасывает "застрявшие" сообщения при старте.
+    logger.info("Запуск бота...")
+    application.run_polling(drop_pending_updates=True)
 
-if __name__ == '__main__':
-    # Используем asyncio для запуска асинхронной функции main
-    asyncio.run(main())
+if __name__ == "__main__":
+    main()
