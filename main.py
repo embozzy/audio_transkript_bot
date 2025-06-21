@@ -38,9 +38,12 @@ except Exception as e:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start."""
-    # Проверяем, что команда вызвана в разрешенной группе или в личных сообщениях
-    if ALLOWED_GROUP_ID and str(update.message.chat.id) != ALLOWED_GROUP_ID and update.message.chat.type != 'private':
-        logger.info(f"Игнорирование команды start из чата {update.message.chat.id}")
+    # Команда /start может быть вызвана в личных сообщениях или в разрешенной группе
+    chat_type = update.message.chat.type
+    chat_id_str = str(update.message.chat_id)
+
+    if ALLOWED_GROUP_ID and chat_type != 'private' and chat_id_str != ALLOWED_GROUP_ID:
+        logger.info(f"Игнорирование команды start из чата {chat_id_str}")
         return
         
     user = update.effective_user
@@ -52,6 +55,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик голосовых, аудио и видео-сообщений."""
     # Проверяем, что сообщение пришло из разрешенной группы
+    # Если ALLOWED_GROUP_ID не задан, бот работает везде
     if ALLOWED_GROUP_ID and str(update.message.chat.id) != ALLOWED_GROUP_ID:
         logger.info(f"Игнорирование медиа из чата {update.message.chat.id}")
         return
