@@ -2,7 +2,6 @@
 import logging
 import os
 import threading
-import httpx # Библиотека для прямых HTTP-запросов
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
@@ -133,18 +132,6 @@ def main() -> None:
         logger.error("Токен TELEGRAM_BOT_TOKEN не найден! Завершение работы.")
         return
 
-    # --- ПРИНУДИТЕЛЬНОЕ УДАЛЕНИЕ СТАРОГО ВЕБХУКА ---
-    logger.info("Принудительное удаление любого существующего вебхука через прямой API вызов...")
-    try:
-        with httpx.Client() as client:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
-            response = client.get(url)
-            logger.info(f"Ответ от Telegram на удаление вебхука: {response.json()}")
-    except Exception as e:
-        logger.error(f"Ошибка при принудительном удалении вебхука: {e}")
-    # --- КОНЕЦ УДАЛЕНИЯ ---
-
-
     # Запускаем Flask в отдельном потоке
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.daemon = True
@@ -159,6 +146,8 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE, handle_media))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
+    # Запускаем бота. Параметр drop_pending_updates=True автоматически
+    # очистит очередь старых сообщений и удалит старый вебхук при старте.
     logger.info("Запуск бота...")
     application.run_polling(drop_pending_updates=True)
 
