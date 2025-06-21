@@ -2,6 +2,7 @@
 import logging
 import os
 import threading
+import httpx # Библиотека для прямых HTTP-запросов
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
@@ -12,7 +13,6 @@ import google.generativeai as genai
 # --- Конфигурация ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-# ID группы, в которой бот должен работать. Берется из переменных окружения.
 ALLOWED_GROUP_ID = os.environ.get('ALLOWED_GROUP_ID')
 
 # Настройка логирования
@@ -41,7 +41,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.message.chat.type
     chat_id_str = str(update.message.chat.id)
 
-    # Если задан ID группы, бот работает только в ней и в личных сообщениях.
     if ALLOWED_GROUP_ID and chat_type != 'private' and chat_id_str != ALLOWED_GROUP_ID:
         logger.info(f"Игнорирование команды start из чата {chat_id_str}")
         return
@@ -57,7 +56,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.message.chat.type
     chat_id_str = str(update.message.chat.id)
 
-    # Если задан ID группы, бот работает только в ней и в личных сообщениях.
     if ALLOWED_GROUP_ID and chat_type != 'private' and chat_id_str != ALLOWED_GROUP_ID:
         logger.info(f"Игнорирование медиа из чата {chat_id_str}")
         return
@@ -71,7 +69,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not media_source:
         return
 
-    # В группе отвечаем на то сообщение, которое расшифровываем
     processing_message = await message.reply_text("🧠 Получил. Начинаю расшифровку...")
 
     try:
@@ -109,7 +106,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.message.chat.type
     chat_id_str = str(update.message.chat.id)
     
-    # Если задан ID группы, бот работает только в ней и в личных сообщениях.
     if ALLOWED_GROUP_ID and chat_type != 'private' and chat_id_str != ALLOWED_GROUP_ID:
         logger.info(f"Игнорирование текста из чата {chat_id_str}")
         return
@@ -137,13 +133,28 @@ def main() -> None:
         logger.error("Токен TELEGRAM_BOT_TOKEN не найден! Завершение работы.")
         return
 
+    # --- ПРИНУДИТЕЛЬНОЕ УДАЛЕНИЕ СТАРОГО ВЕБХУКА ---
+    logger.info("Принудительное удаление любого существующего вебхука через прямой API вызов...")
+    try:
+        with httpx.Client() as client:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteWebhook?drop_pending_updates=true"
+            response = client.get(url)
+            logger.info(f"Ответ от Telegram на удаление вебхука: {response.json()}")
+    except Exception as e:
+        logger.error(f"Ошибка при принудительном удалении вебхука: {e}")
+    # --- КОНЕЦ УДАЛЕНИЯ ---
+
+
+    # Запускаем Flask в отдельном потоке
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.daemon = True
     flask_thread.start()
     logger.info("Dummy Flask сервер запущен в отдельном потоке.")
 
+    # Создаем приложение бота
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE, handle_media))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
