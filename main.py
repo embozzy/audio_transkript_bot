@@ -25,7 +25,7 @@ model = None
 try:
     if GEMINI_API_KEY:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         logger.info("Gemini API успешно настроен.")
     else:
         logger.error("Ключ GEMINI_API_KEY не найден!")
@@ -170,4 +170,5 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
 
