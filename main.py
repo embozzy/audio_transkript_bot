@@ -143,34 +143,31 @@ def run_flask_app():
 
 # --- Основная функция ---
 
-async def main():
+def main() -> None:
     """Основная функция для запуска бота."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("Токен TELEGRAM_BOT_TOKEN не найден! Завершение работы.")
         return
 
+    # Создаем приложение
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
-    await application.bot.delete_webhook(drop_pending_updates=True)
 
+    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE, handle_media))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    logger.info("Запуск бота...")
-    await application.initialize()
-    await application.updater.start_polling()
-    await application.start()
-    logger.info("Бот успешно запущен.")
-
-if __name__ == '__main__':
+    # Запускаем Flask в отдельном потоке
     flask_thread = threading.Thread(target=run_flask_app)
     flask_thread.daemon = True
     flask_thread.start()
+    logger.info("Dummy Flask сервер запущен.")
     
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        loop.create_task(main())
-    else:
-        asyncio.run(main())
+    # Запускаем бота. Эта функция блокирует выполнение, пока процесс не будет остановлен.
+    logger.info("Запуск бота...")
+    application.run_polling(drop_pending_updates=True)
+
+
+if __name__ == '__main__':
+    main()
 
