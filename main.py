@@ -87,7 +87,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sound = AudioSegment.from_file(file_path_original)
         sound.export(file_path_mp3, format="mp3")
 
-        audio_file_for_gemini = genai.upload_file(path=file_path_mp3)
+        #audio_file_for_gemini = genai.upload_file(path=file_path_mp3)
+        audio_file_for_gemini = genai.upload_file(path=file_path_mp3, display_name=file_path_mp3)
         
         prompt = "Расшифруй аудиодорожку из этого файла. Сохрани оригинальный язык и форматирование."
         response = await model.generate_content_async([prompt, audio_file_for_gemini])
@@ -167,5 +168,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
